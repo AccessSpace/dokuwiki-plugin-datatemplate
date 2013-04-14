@@ -62,3 +62,28 @@ div.dokuwiki div.prevnext .disabled {
 	color: #666;
 }
 
+/*my stuff*/
+
+.day {background-color:lightblue; float:left; min-width:2em; text-align:center;}
+.blank {background-color:#EEEEEE; float:left; min-width:2em;}
+.sold {font-weight:bold;background-color:yellow;}
+.past {color:lightgrey;}
+.today {color:blue;}
+.week {clear:both;}
+.monthcal {padding:0.5em; float: left;}
+.monthlabel{background-color:#FFEEFF; text-align:center; clear:both;}
+.daylabels {clear:both;}
+.daylabels div {background-color:#FFFF88; float:left; min-width:2em; text-align:center;}
+.yeararea {}
+.yearlabel {background-color:white;}
+
+  /* tooltip styling. by default the element to be styled is .tooltip  */
+  .tooltip {
+    display:none;
+    background:transparent url(http://jquerytools.org/media/img/tooltip/black_arrow.png);
+    font-size:12px;
+    height:70px;
+    width:160px;
+    padding:25px;
+    color:#eee;
+  }

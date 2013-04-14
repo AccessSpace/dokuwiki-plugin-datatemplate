@@ -47,6 +47,9 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
         // the "template" paramter. So we need to remove the corresponding
         // line from $match.
         $template = '';
+        $start_date = date('Y-m-01');
+        $length_months = 12;
+        $groupby = false;
         $lines = explode("\n", $match);
         foreach ($lines as $num => $line) {
             // ignore comments
@@ -59,6 +62,18 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                 $template = $line[1];
                 unset($lines[$num]);
             }
+            elseif (strtolower($line[0]) == 'start_date') {
+                $start_date = $line[1];
+                unset($lines[$num]);
+            }
+            elseif (strtolower($line[0]) == 'months') {
+                $length_months = $line[1];
+                unset($lines[$num]);
+            }
+            elseif (strtolower($line[0]) == 'groupby') {
+                $groupby = $line[1];
+                unset($lines[$num]);
+            }
         }
         $match = implode("\n", $lines);
         $data = parent::handle($match, $state, $pos, $handler);
@@ -66,6 +81,18 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             $data['template'] = $template;
         }
 
+        if(!empty($start_date)) {
+            $data['start_date'] = $start_date;
+        }
+        
+        if(!empty($length_months)) {
+            $data['length_months'] = $length_months;
+        }
+        
+        if(!empty($groupby)) {
+            $data['groupby'] = $groupby;
+        }
+        
         // For caching purposes, we always need to query the page id.
         if(!array_key_exists('%pageid%', $data['cols'])) {
             $data['cols']['%pageid%'] = array('multi' => '', 'key' => '%pageid%',
@@ -130,21 +157,18 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             }
 
             $datarows = $this->dtc->getData($sql);
-            #echo "\n<br><pre>\ndatarows  =" .var_export($datarows , TRUE)."</pre>";
+            //echo "\n<br><pre>\ndatarows  =" .var_export($datarows , TRUE)."</pre>";
             
             if(count($datarows) < $_REQUEST['dataofs']) $_REQUEST['dataofs'] = 0;
-
             
             if ($cnt === 0) {
                 $this->nullList($data, $clist, $R);
                 return true;
-            }
-
-            
+            }            
             
             $wikipage = preg_split('/\#/u', $data['template'], 2);
 
-            $this->_renderCalendar($wikipage[0], $data, $rows, $R);
+            $this->_renderCalendar($wikipage[0], $data, $datarows, $R);
             
             return true;
         }
@@ -165,22 +189,68 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
      */
     function _renderCalendar($wikipage, $data, $rows, &$R) {
         global $ID;
+        
+        global $ID;
+        resolve_pageid(getNS($ID), $wikipage, $exists);          // resolve shortcuts
+
+        // check for permission
+        if (auth_quickaclcheck($wikipage) < 1) {
+            $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
+            return true;
+        }
+
+        // Now open the template, parse it and do the substitutions.
+        // FIXME: This does not take circular dependencies into account!
+        $file = wikiFN($wikipage);
+        if (!@file_exists($file)) {
+            $R->doc .= '<div class="datatemplatelist">';
+            $R->doc .= "Template {$wikipage} not found. ";
+            $R->internalLink($wikipage, '[Click here to create it]');
+            $R->doc .= '</div>';
+            return true;
+        }
+
+        // Construct replacement keys
+        foreach ($data['headers'] as $num => $head) {
+            $replacers['keys'][] = "@@" . $head . "@@";
+            $replacers['raw_keys'][] = "@@!" . $head . "@@";
+        }
+
+        // Get the raw file, and parse it into its instructions. This could be cached... maybe.
+        $rawFile = io_readfile($file);
+        
 
         
-        
-        
-        define('CONST_START_DATE_STR', "2013/01/01");
-
         $o1Day = new DateInterval('P1D');
-        $oStartDate = new DateTime(CONST_START_DATE_STR);
-        $iMonths = 16;
+        $oStartDate = new DateTime($data['start_date']);
+        $length_months = $data['length_months'];
         $oDate = clone $oStartDate;
         $iDay = 1;
         $aMonths = array();
         $aData = array();
         
+        $aGrouped = array();
+        $iGroupKey = array_search($data['groupby'], $data['headers']);
+        if($iGroupKey === false)
+        {
+          return true;
+        }
         
-        for($iMonth = 0; $iMonth < $iMonths; $iMonth++)
+        foreach($rows as $row)
+        {
+          $sKey = trim($row[$iGroupKey]);
+          if(!isset($aGrouped[$sKey]))
+          {
+            $aGrouped[$sKey] = array();
+          }
+          $aGrouped[$sKey][] = $row;
+        }
+        //echo "\n<br><pre>\naGrouped =" .var_export($aGrouped, TRUE)."</pre>";
+        
+        
+        
+        
+        for($iMonth = 0; $iMonth < $length_months; $iMonth++)
         {
           
            $iWeekDay = $oDate->format('N');
@@ -201,10 +271,11 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
              $aMonth[$iBlock] = array(
                'iDay'      => $iDay,
                'sFullDate' => $oDate->format('l jS F Y'),
-               'bIsSold'   => ($iDay % 9 === 0),
+               #'bIsSold'   => ($iDay % 9 === 0),
                'sDayName'  => strtolower($oDate->format('l')),       
-               'iMonthDay'  => $oDate->format('j'),
-               'iYearDay'  => $oDate->format('z')+1
+               'iMonthDay' => $oDate->format('j'),
+               'iYearDay'  => $oDate->format('z')+1,
+               'sDate'     => $oDate->format('Y-m-d')
              );
              
              $oDate->add($o1Day);
@@ -232,7 +303,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
           }
           
           $sHTML .= '<div class="monthcal">';
-          $sHTML .= '<div class="monthlabel" colspan="7">'. $aMonthData['month']. '</div>'."\n";
+          $sHTML .= '<div class="monthlabel">'. $aMonthData['month']. '</div>'."\n";
           $sHTML .= '<div class="daylabels"><div>Mo</div><div>Tu</div> <div>We</div><div>Th</div><div>Fr</div><div>Sa</div> <div>Su</div></div>'."\n";
           $sHTML .= '<div class="weeks">';
           for($iRow = 0; $iRow < 6; $iRow++)
@@ -251,14 +322,68 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
               {
                 $aBlock = $aMonth[$iPos];
                 
+                
                 $sPopUp = $aBlock['sFullDate'].'<br />';
+                
+                $aBlock['bIsSold'] = isset($aGrouped[$aBlock['sDate']]); 
+                
+                # TODO : redo the replace code to do several for each day 
+                # TODO : place generated text in the $sPopUp
+        
                 if($aBlock['bIsSold'])
                 {
-                  $sPopUp .= 'by ...... for .....'.'<br />';
+                  // We only want to call the parser once, so first do all the raw replacements and concatenate
+                  // the strings.
+                  $clist = array_keys($data['cols']);
+                  $raw = "";
+                  $i = 0;
+                  $replacers['vals_id'] = array();
+                  $replacers['keys_id'] = array();
+                  foreach ($aGrouped[$aBlock['sDate']] as $row) {
+                      $replacers['keys_id'][$i] = array();
+                      foreach($replacers['keys'] as $key) {
+                          $replacers['keys_id'][$i][] = "@@[" . $i . "]" . substr($key,2);
+                      }
+                      $replacers['vals_id'][$i] = array();
+                      $replacers['raw_vals'] = array();
+                      foreach($row as $num => $cval) {
+                          $replacers['raw_vals'][] = trim($cval);
+                          $replacers['vals_id'][$i][] = $this->dthlp->_formatData($data['cols'][$clist[$num]], $cval, $R);
+                          
+                      }
+          
+                      // First do raw replacements
+                      $rawPart = str_replace($replacers['raw_keys'], $replacers['raw_vals'], $rawFile);
+                      // Now mark all remaining keys with an index
+                      $rawPart = str_replace($replacers['keys'], $replacers['keys_id'][$i], $rawPart);
+                      $raw .= $rawPart;
+                      $i++;
+                  }
+                  
+                  $instr = p_get_instructions($raw);
+                  $text = p_render('xhtml', $instr, $info);
+                  // remove toc, section edit buttons and category tags
+                  $patterns = array('!<div class="toc">.*?(</div>\n</div>)!s',
+                                    '#<!-- SECTION \[(\d*-\d*)\] -->#e',
+                                    '!<div class="category">.*?</div>!s');
+                  $replace  = array('','','');
+                  $text = preg_replace($patterns,$replace,$text);
+                  
+                  // Do remaining replacements
+                  foreach($replacers['vals_id'] as $num => $vals) {
+                      $text = str_replace($replacers['keys_id'][$num], $vals, $text);
+                  }
+          
+                  // Replace unused placeholders by empty string
+                  $text = preg_replace('/@@.*?@@/', '', $text);
+                  
+                  
+                  $sPopUp .= $text.'<br />';
                 }
                 
                 $sPopUp .= 'Sponsor for &pound;'.$aBlock['iYearDay'];
-                
+                # TODO : also need a statc template just for the date
+        
                 
                 $sHTML .= '<div class="day '.$aBlock['sDayName'].' '.($aBlock['bIsSold']?'sold':'available').' '.'">'.$aBlock['iMonthDay'].'</div>'."\n";
                 $sHTML .= '<div class="tooltip">'.$sPopUp.'</div>';
@@ -293,84 +418,10 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
      * @return boolean Whether the page has been correctly (not: succesfully) processed.
      */
     function _renderTemplate($wikipage, $data, $rows, &$R) {
-        global $ID;
-        resolve_pageid(getNS($ID), $wikipage, $exists);          // resolve shortcuts
-
-        // check for permission
-        if (auth_quickaclcheck($wikipage) < 1) {
-            $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
-            return true;
-        }
-
-        // Now open the template, parse it and do the substitutions.
-        // FIXME: This does not take circular dependencies into account!
-        $file = wikiFN($wikipage);
-        if (!@file_exists($file)) {
-            $R->doc .= '<div class="datatemplatelist">';
-            $R->doc .= "Template {$wikipage} not found. ";
-            $R->internalLink($wikipage, '[Click here to create it]');
-            $R->doc .= '</div>';
-            return true;
-        }
-
-        // Construct replacement keys
-        foreach ($data['headers'] as $num => $head) {
-            $replacers['keys'][] = "@@" . $head . "@@";
-            $replacers['raw_keys'][] = "@@!" . $head . "@@";
-        }
-
-        // Get the raw file, and parse it into its instructions. This could be cached... maybe.
-        $rawFile = io_readfile($file);
-
-        // embed the included page
-        $R->doc .= "<div class=\"${data['classes']}\">";
-
-        // We only want to call the parser once, so first do all the raw replacements and concatenate
-        // the strings.
-        $clist = array_keys($data['cols']);
-        $raw = "";
-        $i = 0;
-        $replacers['vals_id'] = array();
-        $replacers['keys_id'] = array();
-        foreach ($rows as $row) {
-            $replacers['keys_id'][$i] = array();
-            foreach($replacers['keys'] as $key) {
-                $replacers['keys_id'][$i][] = "@@[" . $i . "]" . substr($key,2);
-            }
-            $replacers['vals_id'][$i] = array();
-            $replacers['raw_vals'] = array();
-            foreach($row as $num => $cval) {
-                $replacers['raw_vals'][] = trim($cval);
-                $replacers['vals_id'][$i][] = $this->dthlp->_formatData($data['cols'][$clist[$num]], $cval, $R);
-            }
-
-            // First do raw replacements
-            $rawPart = str_replace($replacers['raw_keys'], $replacers['raw_vals'], $rawFile);
-            // Now mark all remaining keys with an index
-            $rawPart = str_replace($replacers['keys'], $replacers['keys_id'][$i], $rawPart);
-            $raw .= $rawPart;
-            $i++;
-        }
-        $instr = p_get_instructions($raw);
-
-        // render the instructructions on the fly
-        $text = p_render('xhtml', $instr, $info);
-        // remove toc, section edit buttons and category tags
-        $patterns = array('!<div class="toc">.*?(</div>\n</div>)!s',
-                          '#<!-- SECTION \[(\d*-\d*)\] -->#e',
-                          '!<div class="category">.*?</div>!s');
-        $replace  = array('','','');
-        $text = preg_replace($patterns,$replace,$text);
-        // Do remaining replacements
-        foreach($replacers['vals_id'] as $num => $vals) {
-            $text = str_replace($replacers['keys_id'][$num], $vals, $text);
-        }
-
-        // Replace unused placeholders by empty string
-        $text = preg_replace('/@@.*?@@/', '', $text);
-
-        $R->doc .= $text;
-        $R->doc .= '</div>';
+        
+        
+        #$R->doc .= $text;
+        #$R->doc .= '</div>';
 
         return true;
     }

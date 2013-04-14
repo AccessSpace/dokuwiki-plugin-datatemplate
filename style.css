@@ -87,3 +87,10 @@ div.dokuwiki div.prevnext .disabled {
     padding:25px;
     color:#eee;
   }
+  
+  /* override the arrow image of the tooltip */
+.tooltip.bottom {
+  background:url(http://jquerytools.org/media/img/tooltip/black_arrow_bottom.png);
+  padding-top:40px;
+  height:55px;
+}

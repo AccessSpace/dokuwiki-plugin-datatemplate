@@ -47,6 +47,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
         // the "template" paramter. So we need to remove the corresponding
         // line from $match.
         $template = '';
+        $daytemplate = '';
         $start_date = date('Y-m-01');
         $length_months = 12;
         $groupby = false;
@@ -60,6 +61,10 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             $line = preg_split('/\s*:\s*/', $line, 2);
             if (strtolower($line[0]) == 'template') {
                 $template = $line[1];
+                unset($lines[$num]);
+            }
+            elseif (strtolower($line[0]) == 'daytemplate') {
+                $daytemplate = $line[1];
                 unset($lines[$num]);
             }
             elseif (strtolower($line[0]) == 'start_date') {
@@ -81,6 +86,10 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             $data['template'] = $template;
         }
 
+        if(!empty($daytemplate)) {
+            $data['daytemplate'] = $daytemplate;
+        }
+        
         if(!empty($start_date)) {
             $data['start_date'] = $start_date;
         }
@@ -167,8 +176,8 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             }            
             
             $wikipage = preg_split('/\#/u', $data['template'], 2);
-
-            $this->_renderCalendar($wikipage[0], $data, $datarows, $R);
+            $daypage  = preg_split('/\#/u', $data['daytemplate'], 2);
+            $this->_renderCalendar($wikipage[0], $daypage[0], $data, $datarows, $R);
             
             return true;
         }
@@ -187,12 +196,22 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
      * @param reference $R the dokuwiki renderer
      * @return boolean Whether the page has been correctly (not: succesfully) processed.
      */
-    function _renderCalendar($wikipage, $data, $rows, &$R) {
-        global $ID;
-        
+    function _renderCalendar($wikipage, $daypage, $data, $rows, &$R) {
         global $ID;
         resolve_pageid(getNS($ID), $wikipage, $exists);          // resolve shortcuts
-
+        resolve_pageid(getNS($ID), $daypage, $exists); 
+        
+        $aFormatReplacements = array(
+               'iDay'      => '@@counter@@',
+               'sFullDate' => '@@date_full@@',
+               #'bIsSold'   => ($iDay % 9 === 0),
+               'sDayName'  => '@@date_dayname@@',       
+               'iMonthDay' => '@@date_monthday@@',
+               'iYearDay'  => '@@date_yearday@@',
+               'sDate'     => '@@date_wiki@@'
+             );
+             
+        $aFormatReplacers = array_values($aFormatReplacements);
         // check for permission
         if (auth_quickaclcheck($wikipage) < 1) {
             $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
@@ -210,6 +229,24 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             return true;
         }
 
+        
+        if (auth_quickaclcheck($daypage) < 1) {
+            $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
+            return true;
+        }
+
+        // Now open the template, parse it and do the substitutions.
+        // FIXME: This does not take circular dependencies into account!
+        $dayfile = wikiFN($daypage);
+        if (!@file_exists($dayfile)) {
+            $R->doc .= '<div class="datatemplatelist">';
+            $R->doc .= "Template {$daypage} not found. ";
+            $R->internalLink($daypage, '[Click here to create it]');
+            $R->doc .= '</div>';
+            return true;
+        }
+
+        
         // Construct replacement keys
         foreach ($data['headers'] as $num => $head) {
             $replacers['keys'][] = "@@" . $head . "@@";
@@ -218,8 +255,19 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
 
         // Get the raw file, and parse it into its instructions. This could be cached... maybe.
         $rawFile = io_readfile($file);
+        $rawDay = io_readfile($dayfile);
         
-
+        // remove toc, section edit buttons and category tags
+        $patterns = array('!<div class="toc">.*?(</div>\n</div>)!s',
+                          '#<!-- SECTION \[(\d*-\d*)\] -->#e',
+                          '!<div class="category">.*?</div>!s');
+        $replace  = array('','','');
+        
+        $instrDay = p_get_instructions($rawDay);
+        $textDay = p_render('xhtml', $instrDay, $info);
+        
+        $textDay = trim(preg_replace($patterns,$replace,$textDay));
+        #echo "\n<br><pre>\ntextDay  =" .htmlentities($textDay)."</pre>";
         
         $o1Day = new DateInterval('P1D');
         $oStartDate = new DateTime($data['start_date']);
@@ -245,11 +293,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
           }
           $aGrouped[$sKey][] = $row;
         }
-        //echo "\n<br><pre>\naGrouped =" .var_export($aGrouped, TRUE)."</pre>";
-        
-        
-        
-        
+                
         for($iMonth = 0; $iMonth < $length_months; $iMonth++)
         {
           
@@ -283,15 +327,13 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
            }
         }
         
-        //echo "\n<br><pre>\naData  =" .var_export($aData , TRUE)."</pre>";
-        
         $sHTML = '';
         $iCurrentYear = 0;
         
         foreach($aData as $aMonthData)
         {
           $aMonth =& $aMonthData['blocks'];
-          if( $aMonthData['year'] !== $iCurrentYear)
+          if($aMonthData['year'] !== $iCurrentYear)
           {
             
             if($iCurrentYear > 0)
@@ -327,9 +369,6 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                 
                 $aBlock['bIsSold'] = isset($aGrouped[$aBlock['sDate']]); 
                 
-                # TODO : redo the replace code to do several for each day 
-                # TODO : place generated text in the $sPopUp
-        
                 if($aBlock['bIsSold'])
                 {
                   // We only want to call the parser once, so first do all the raw replacements and concatenate
@@ -357,11 +396,13 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                       // Now mark all remaining keys with an index
                       $rawPart = str_replace($replacers['keys'], $replacers['keys_id'][$i], $rawPart);
                       $raw .= $rawPart;
+                      
                       $i++;
                   }
                   
                   $instr = p_get_instructions($raw);
                   $text = p_render('xhtml', $instr, $info);
+                  
                   // remove toc, section edit buttons and category tags
                   $patterns = array('!<div class="toc">.*?(</div>\n</div>)!s',
                                     '#<!-- SECTION \[(\d*-\d*)\] -->#e',
@@ -377,13 +418,14 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                   // Replace unused placeholders by empty string
                   $text = preg_replace('/@@.*?@@/', '', $text);
                   
-                  
-                  $sPopUp .= $text.'<br />';
+                  $sPopUp .= $text;
                 }
                 
-                $sPopUp .= 'Sponsor for &pound;'.$aBlock['iYearDay'];
-                # TODO : also need a statc template just for the date
-        
+                $sCurrDayText =str_replace($aFormatReplacements, $aBlock,$textDay);
+                $sCurrDayText = preg_replace('/@@.*?@@/', '', $sCurrDayText);
+                         
+                $sPopUp .= $sCurrDayText;
+                
                 
                 $sHTML .= '<div class="day '.$aBlock['sDayName'].' '.($aBlock['bIsSold']?'sold':'available').' '.'">'.$aBlock['iMonthDay'].'</div>'."\n";
                 $sHTML .= '<div class="tooltip">'.$sPopUp.'</div>';

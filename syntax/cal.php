@@ -46,8 +46,8 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
         // We want the parent to handle the parsing, but still accept
         // the "template" paramter. So we need to remove the corresponding
         // line from $match.
-        $template = '';
-        $daytemplate = '';
+        $aTemplates = array('datatemplate'=>'','freedaytemplate'=>'','useddaytemplate'=>'');
+        
         $start_date = date('Y-m-01');
         $length_months = 12;
         $groupby = false;
@@ -59,12 +59,16 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             $line = trim($line);
             if(empty($line)) continue;
             $line = preg_split('/\s*:\s*/', $line, 2);
-            if (strtolower($line[0]) == 'template') {
-                $template = $line[1];
+            if (strtolower($line[0]) == 'datatemplate') {
+                $aTemplates['datatemplate'] = $line[1];
                 unset($lines[$num]);
             }
-            elseif (strtolower($line[0]) == 'daytemplate') {
-                $daytemplate = $line[1];
+            elseif (strtolower($line[0]) == 'freedaytemplate') {
+                $aTemplates['freedaytemplate'] = $line[1];
+                unset($lines[$num]);
+            }
+            elseif (strtolower($line[0]) == 'useddaytemplate') {
+                $aTemplates['useddaytemplate'] = $line[1];
                 unset($lines[$num]);
             }
             elseif (strtolower($line[0]) == 'start_date') {
@@ -82,13 +86,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
         }
         $match = implode("\n", $lines);
         $data = parent::handle($match, $state, $pos, $handler);
-        if(!empty($template)) {
-            $data['template'] = $template;
-        }
-
-        if(!empty($daytemplate)) {
-            $data['daytemplate'] = $daytemplate;
-        }
+        $data['aTemplates'] = $aTemplates;
         
         if(!empty($start_date)) {
             $data['start_date'] = $start_date;
@@ -158,12 +156,12 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             $R->info['cache'] = false;
             $this->dtc->checkAndBuildCache($data, $sql, $this);
 
-            if(!array_key_exists('template', $data)) {
+            /*if(!array_key_exists('template', $data)) {
                 // If keyword "template" not present, we will leave
                 // the rendering to the parent class.
                 msg("datatemplatecal: no template specified, using standard table output.");
                 return parent::render($format, $R, $data);
-            }
+            }*/
 
             $datarows = $this->dtc->getData($sql);
             //echo "\n<br><pre>\ndatarows  =" .var_export($datarows , TRUE)."</pre>";
@@ -175,9 +173,14 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                 return true;
             }            
             
-            $wikipage = preg_split('/\#/u', $data['template'], 2);
-            $daypage  = preg_split('/\#/u', $data['daytemplate'], 2);
-            $this->_renderCalendar($wikipage[0], $daypage[0], $data, $datarows, $R);
+            $aWikiPages = array();
+            foreach($data['aTemplates'] as $sName => $sTemplate)
+            {
+              $aPageParts = preg_split('/\#/u', $sTemplate, 2);
+              $aWikiPages[$sName] = $aPageParts[0];
+            }
+            
+            $this->_renderCalendar($aWikiPages, $data, $datarows, $R);
             
             return true;
         }
@@ -185,67 +188,72 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
     }
 
     
+    function getWikiPage($datawikipage, &$R)
+    {
+      // check for permission
+        if (auth_quickaclcheck($datawikipage) < 1) {
+            $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
+            return true;
+        }
+
+        // Now open the template, parse it and do the substitutions.
+        // FIXME: This does not take circular dependencies into account!
+        $file = wikiFN($datawikipage);
+        if (!@file_exists($file)) {
+            $R->doc .= '<div class="datatemplatelist">';
+            $R->doc .= "Template {$datawikipage} not found. ";
+            $R->internalLink($datawikipage, '[Click here to create it]');
+            $R->doc .= '</div>';
+            return true;
+        }
+        $rawText = io_readfile($file);
+        return $rawText;
+    }
+    
+    
     /**
      * Rendering of the calendar. The code is heavily inspired by the templater plugin by
      * Jonathan Arkell. Not taken into consideration are correction of relative links in the
      * template, and circular dependencies.
      *
-     * @param string $wikipage the id of the wikipage containing the template
+     * @param string $datawikipage the id of the wikipage containing the template
      * @param array $data output of the handle function
      * @param array $rows the result of the sql query
      * @param reference $R the dokuwiki renderer
      * @return boolean Whether the page has been correctly (not: succesfully) processed.
      */
-    function _renderCalendar($wikipage, $daypage, $data, $rows, &$R) {
+    function _renderCalendar($aWikiPages, $data, $rows, &$R) {
         global $ID;
-        resolve_pageid(getNS($ID), $wikipage, $exists);          // resolve shortcuts
-        resolve_pageid(getNS($ID), $daypage, $exists); 
         
-        $aFormatReplacements = array(
-               'iDay'      => '@@counter@@',
-               'sFullDate' => '@@date_full@@',
-               #'bIsSold'   => ($iDay % 9 === 0),
-               'sDayName'  => '@@date_dayname@@',       
-               'iMonthDay' => '@@date_monthday@@',
-               'iYearDay'  => '@@date_yearday@@',
-               'sDate'     => '@@date_wiki@@'
-             );
-             
-        $aFormatReplacers = array_values($aFormatReplacements);
-        // check for permission
-        if (auth_quickaclcheck($wikipage) < 1) {
-            $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
-            return true;
-        }
-
-        // Now open the template, parse it and do the substitutions.
-        // FIXME: This does not take circular dependencies into account!
-        $file = wikiFN($wikipage);
-        if (!@file_exists($file)) {
-            $R->doc .= '<div class="datatemplatelist">';
-            $R->doc .= "Template {$wikipage} not found. ";
-            $R->internalLink($wikipage, '[Click here to create it]');
-            $R->doc .= '</div>';
-            return true;
-        }
-
+        $datawikipage = $aWikiPages['datatemplate']; 
+        $freedaywikipage = $aWikiPages['freedaytemplate']; 
+        $useddaywikipage = $aWikiPages['useddaytemplate']; 
         
-        if (auth_quickaclcheck($daypage) < 1) {
-            $R->doc .= '<div class="datatemplatelist"> No permissions to view the template </div>';
-            return true;
+        
+        resolve_pageid(getNS($ID), $datawikipage, $exists);          // resolve shortcuts
+        resolve_pageid(getNS($ID), $freedaywikipage, $exists);       // resolve shortcuts
+        resolve_pageid(getNS($ID), $useddaywikipage, $exists); 
+        
+       
+        $dataRawText = $this->getWikiPage($datawikipage, $R);
+        if($dataRawText === true)
+        {
+          return true;
         }
-
-        // Now open the template, parse it and do the substitutions.
-        // FIXME: This does not take circular dependencies into account!
-        $dayfile = wikiFN($daypage);
-        if (!@file_exists($dayfile)) {
-            $R->doc .= '<div class="datatemplatelist">';
-            $R->doc .= "Template {$daypage} not found. ";
-            $R->internalLink($daypage, '[Click here to create it]');
-            $R->doc .= '</div>';
-            return true;
+        
+        $freedayRawText = $this->getWikiPage($freedaywikipage, $R);
+        if($freedayRawText === true)
+        {
+          return true;
         }
-
+        
+        
+        $useddayRawText = $this->getWikiPage($useddaywikipage, $R);
+        if($useddayRawText === true)
+        {
+          return true;
+        }
+        
         
         // Construct replacement keys
         foreach ($data['headers'] as $num => $head) {
@@ -253,9 +261,6 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
             $replacers['raw_keys'][] = "@@!" . $head . "@@";
         }
 
-        // Get the raw file, and parse it into its instructions. This could be cached... maybe.
-        $rawFile = io_readfile($file);
-        $rawDay = io_readfile($dayfile);
         
         // remove toc, section edit buttons and category tags
         $patterns = array('!<div class="toc">.*?(</div>\n</div>)!s',
@@ -263,11 +268,22 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                           '!<div class="category">.*?</div>!s');
         $replace  = array('','','');
         
-        $instrDay = p_get_instructions($rawDay);
-        $textDay = p_render('xhtml', $instrDay, $info);
+        $freedayInstr = p_get_instructions($freedayRawText);
+        $freedayText = p_render('xhtml', $freedayInstr, $info);
+        $freedayText = trim(preg_replace($patterns,$replace,$freedayText));
         
-        $textDay = trim(preg_replace($patterns,$replace,$textDay));
-        #echo "\n<br><pre>\ntextDay  =" .htmlentities($textDay)."</pre>";
+        $useddayInstr = p_get_instructions($useddayRawText);
+        $useddayText = p_render('xhtml', $useddayInstr, $info);
+        $useddayText = trim(preg_replace($patterns,$replace,$useddayText));
+        
+        $aMatches = array();
+        preg_match_all('/@%@(.*)?@%@/',$freedayText.' '.$useddayText, $aMatches);
+        $aDatePatterns = array('sPattern'=>array(), 'sFormat' => array());
+        foreach($aMatches[0] as $iMatch => $sMatch)
+        {
+          $aDatePatterns['sPattern'][$iMatch] = $sMatch;
+          $aDatePatterns['sFormat'][$iMatch] = $aMatches[1][$iMatch];
+        }
         
         $o1Day = new DateInterval('P1D');
         $oStartDate = new DateTime($data['start_date']);
@@ -319,8 +335,21 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                'sDayName'  => strtolower($oDate->format('l')),       
                'iMonthDay' => $oDate->format('j'),
                'iYearDay'  => $oDate->format('z')+1,
-               'sDate'     => $oDate->format('Y-m-d')
+               'sDate'     => $oDate->format('Y-m-d'),
+               'aReplacements' => array()
              );
+             foreach($aDatePatterns['sPattern'] as $iMatch => $sPattern)
+             {
+               $sFormat = $aDatePatterns['sFormat'][$iMatch];
+               switch($sFormat)
+               {
+                 case 'yearday':
+                   $aMonth[$iBlock]['aReplacements'][$sPattern] = intval($oDate->format('z')) + 1;
+                   break;
+                 default:
+                   $aMonth[$iBlock]['aReplacements'][$sPattern] = $oDate->format($sFormat);
+               }
+             }
              
              $oDate->add($o1Day);
              $iDay++;
@@ -364,8 +393,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
               {
                 $aBlock = $aMonth[$iPos];
                 
-                
-                $sPopUp = $aBlock['sFullDate'].'<br />';
+                $sPopUp = "";
                 
                 $aBlock['bIsSold'] = isset($aGrouped[$aBlock['sDate']]); 
                 
@@ -392,7 +420,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                       }
           
                       // First do raw replacements
-                      $rawPart = str_replace($replacers['raw_keys'], $replacers['raw_vals'], $rawFile);
+                      $rawPart = str_replace($replacers['raw_keys'], $replacers['raw_vals'], $dataRawText);
                       // Now mark all remaining keys with an index
                       $rawPart = str_replace($replacers['keys'], $replacers['keys_id'][$i], $rawPart);
                       $raw .= $rawPart;
@@ -402,12 +430,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                   
                   $instr = p_get_instructions($raw);
                   $text = p_render('xhtml', $instr, $info);
-                  
                   // remove toc, section edit buttons and category tags
-                  $patterns = array('!<div class="toc">.*?(</div>\n</div>)!s',
-                                    '#<!-- SECTION \[(\d*-\d*)\] -->#e',
-                                    '!<div class="category">.*?</div>!s');
-                  $replace  = array('','','');
                   $text = preg_replace($patterns,$replace,$text);
                   
                   // Do remaining replacements
@@ -418,12 +441,17 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                   // Replace unused placeholders by empty string
                   $text = preg_replace('/@@.*?@@/', '', $text);
                   
-                  $sPopUp .= $text;
+                  //$sPopUp .= $text;
+                  $aBlock['aReplacements']['@%@useddata@%@'] = $text;
+                  $sCurrDayText = $useddayText;
+                }
+                else
+                {
+                  $sCurrDayText = $freedayText;
                 }
                 
-                $sCurrDayText =str_replace($aFormatReplacements, $aBlock,$textDay);
-                $sCurrDayText = preg_replace('/@@.*?@@/', '', $sCurrDayText);
-                         
+                $sCurrDayText = str_replace(array_keys($aBlock['aReplacements']), $aBlock['aReplacements'], $sCurrDayText);
+                $sCurrDayText = preg_replace('/@%@.*?@%@/', '', $sCurrDayText);
                 $sPopUp .= $sCurrDayText;
                 
                 
@@ -453,13 +481,13 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
      * Jonathan Arkell. Not taken into consideration are correction of relative links in the
      * template, and circular dependencies.
      *
-     * @param string $wikipage the id of the wikipage containing the template
+     * @param string $datawikipage the id of the wikipage containing the template
      * @param array $data output of the handle function
      * @param array $rows the result of the sql query
      * @param reference $R the dokuwiki renderer
      * @return boolean Whether the page has been correctly (not: succesfully) processed.
      */
-    function _renderTemplate($wikipage, $data, $rows, &$R) {
+    function _renderTemplate($datawikipage, $data, $rows, &$R) {
         
         
         #$R->doc .= $text;

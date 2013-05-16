@@ -79,14 +79,7 @@ div.dokuwiki div.prevnext .disabled {
 
   /* tooltip styling. by default the element to be styled is .tooltip  */
   .tooltip {
-    /*display:none;
-    background:transparent url(http://jquerytools.org/media/img/tooltip/black_arrow.png);
-    font-size:12px;
-    height:70px;
-    width:160px;
-    padding:25px;
-    color:#eee;*/
-    background:transparent url(http://jquerytools.org/media/img/tooltip/black_arrow_big.png) no-repeat scroll 0 0;
+    background:transparent url(images/black_big.png) no-repeat scroll 0 0;
     font-size:14px;
     height:153px;
     padding:30px;
@@ -96,11 +89,4 @@ div.dokuwiki div.prevnext .disabled {
     color:#fff;
   }
   
-/*  .tooltip p {padding}*/
-  
-  /* override the arrow image of the tooltip */
-.tooltip.bottom {
-  background:url(http://jquerytools.org/media/img/tooltip/black_arrow_bottom.png);
-  padding-top:40px;
-  height:55px;
-}
+

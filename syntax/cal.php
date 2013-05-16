@@ -324,7 +324,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
            
            $aMonth =& $aData[$iMonth]['blocks'];
            
-           for($iBlock = $iWeekDay; $iBlock < $iWeekDay + $iMonthDays; $iBlock ++)
+           for($iBlock = $iWeekDay-1; $iBlock < $iWeekDay -1 + $iMonthDays; $iBlock ++)
            {
              
              //loop THrough days to put data in THe 
@@ -343,6 +343,9 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
                $sFormat = $aDatePatterns['sFormat'][$iMatch];
                switch($sFormat)
                {
+                 case 'date':
+                   $aMonth[$iBlock]['aReplacements'][$sPattern] = $oDate->format('Y-m-d');
+                   break;
                  case 'yearday':
                    $aMonth[$iBlock]['aReplacements'][$sPattern] = intval($oDate->format('z')) + 1;
                    break;
@@ -362,7 +365,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
         foreach($aData as $aMonthData)
         {
           $aMonth =& $aMonthData['blocks'];
-          if($aMonthData['year'] !== $iCurrentYear)
+          if(false && $aMonthData['year'] !== $iCurrentYear)
           {
             
             if($iCurrentYear > 0)
@@ -374,7 +377,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
           }
           
           $sHTML .= '<div class="monthcal">';
-          $sHTML .= '<div class="monthlabel">'. $aMonthData['month']. '</div>'."\n";
+          $sHTML .= '<div class="monthlabel">'. $aMonthData['month'].' '. $aMonthData['year']. '</div>'."\n";
           $sHTML .= '<div class="daylabels"><div>Mo</div><div>Tu</div> <div>We</div><div>Th</div><div>Fr</div><div>Sa</div> <div>Su</div></div>'."\n";
           $sHTML .= '<div class="weeks">';
           for($iRow = 0; $iRow < 6; $iRow++)
@@ -465,7 +468,7 @@ class syntax_plugin_datatemplate_cal extends syntax_plugin_data_table {
           $sHTML .= '</div><!-- monthcal end-->'."\n";
         }
         
-        $sHTML .= '</div>';
+        //$sHTML .= '</div>';
 
         
         
